@@ -7,7 +7,7 @@ using namespace std;
 int main(int argc, char** argv) {
 	VideoCapture webCam(0);
 	if (!webCam.isOpened()) {
-		cout << "À¥Ä· ¿­±â ½ÇÆÐ ³ëÆ®ºÏ »Ñ¼Å»Ñ¼Å" << endl;
+		cout << "webcam open error" << endl;
 		return 1;
 	}
 
@@ -26,12 +26,12 @@ int main(int argc, char** argv) {
 		if (img.empty()) break;
 		
 		/*
-		//Ä³´Ï¿§Áö¿¬»ê
+		//canny edge
 		Canny(imgGray, imgGray, 20, 50);
 		*/
 		
 		/*
-		//¶óº§¸µ
+		//labeling
 		
 		int c = connectedComponentsWithStats(imgGray, imgLabel, stats, centroids);
 		for (int y = 0; y<imgLabel.rows; ++y) {
@@ -49,16 +49,16 @@ int main(int argc, char** argv) {
 		}
 		*/
 
-		//¼Õ
+		//skin color
 		cvtColor(img, imgSkin, CV_BGR2YCrCb);
 		inRange(imgSkin, Scalar(0, 133, 77), Scalar(255, 173, 127), imgSkin);
 		cvtColor(imgSkin, imgSkin, CV_GRAY2RGB);
 		
 
-		// ÇÊÅÍ È¿°ú¸¦ ´õ µÎµå·¯Áö°Ô 3x3 ±¸Á¶ ¿ä¼Ò¸¦ »ç¿ë
+		// 3x3
 		Mat element5(3, 3, CV_8U, cv::Scalar(1));
 
-		// ¿µ»ó ´ÝÈû°ú ¿µ»ó ¿­¸² (¿­¸², ´ÝÈû ¿¬»êÀÚ)
+		// expansion operation
 		morphologyEx(img, img, MORPH_CLOSE, element5);
 		morphologyEx(img, img, MORPH_OPEN, element5);
 
