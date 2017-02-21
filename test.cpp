@@ -4,6 +4,44 @@
 using namespace cv;
 using namespace std;
 
+
+Mat getSkinColorMask(const Mat& img) {
+	Mat imgSkin;
+
+	// 3x3
+	Mat element(3, 3, CV_8U, cv::Scalar(1));
+
+	//skin color
+	cvtColor(img, imgSkin, CV_BGR2YCrCb);
+	inRange(imgSkin, Scalar(0, 133, 77), Scalar(255, 173, 127), imgSkin);
+	cvtColor(imgSkin, imgSkin, CV_GRAY2RGB);
+
+	// expansion operation
+	morphologyEx(img, img, MORPH_CLOSE, element);
+	morphologyEx(img, img, MORPH_OPEN, element);
+
+	bitwise_and(imgSkin, img, imgSkin);
+
+	return imgSkin;
+}
+
+Point findHand(Mat & img) {
+	Mat dist, imgGray;
+	int maxIdx[2];
+	double radius;
+	
+	cvtColor(img, imgGray, CV_RGB2GRAY);
+	distanceTransform(imgGray, dist, CV_DIST_L2, 5);
+
+	//maximum -> hand's center
+	minMaxIdx(dist, NULL, &radius, NULL, maxIdx);
+	Point p(maxIdx[1], maxIdx[0]);
+
+	circle(img, p, (int)radius, Scalar(0, 255, 0), 2);
+	return p;
+}
+
+
 int main(int argc, char** argv) {
 	VideoCapture webCam(0);
 	if (!webCam.isOpened()) {
@@ -16,57 +54,23 @@ int main(int argc, char** argv) {
 
 	namedWindow("window", 1);
 	Mat img, imgGray;
-	Mat imgSkin, imgLabel;
-	Mat stats, centroids;
-	Mat imgHand;
+	Mat imgSkin;
 	while (1) {
 		webCam.read(img);
 		cvtColor(img, imgGray, CV_RGB2GRAY);
 		
 		if (img.empty()) break;
+						
+		imgSkin = getSkinColorMask(img);
+		
+		findHand(imgSkin);
 		
 		/*
 		//canny edge
-		Canny(imgGray, imgGray, 20, 50);
+		Canny(imgGray, imgGray, 50, 100);
 		*/
-		
-		/*
-		//labeling
-		
-		int c = connectedComponentsWithStats(imgGray, imgLabel, stats, centroids);
-		for (int y = 0; y<imgLabel.rows; ++y) {
-
-			int *label = imgLabel.ptr<int>(y);
-			Vec3b* pixel = imgGray.ptr<Vec3b>(y);
-
-			for (int x = 0; x < imgLabel.cols; ++x) {
-				if (label[x] == 0) {
-					pixel[x][2] = 0;
-					pixel[x][1] = 255;
-					pixel[x][0] = 0;
-				}
-			}
-		}
-		*/
-
-		//skin color
-		cvtColor(img, imgSkin, CV_BGR2YCrCb);
-		inRange(imgSkin, Scalar(0, 133, 77), Scalar(255, 173, 127), imgSkin);
-		cvtColor(imgSkin, imgSkin, CV_GRAY2RGB);
-		
-
-		// 3x3
-		Mat element5(3, 3, CV_8U, cv::Scalar(1));
-
-		// expansion operation
-		morphologyEx(img, img, MORPH_CLOSE, element5);
-		morphologyEx(img, img, MORPH_OPEN, element5);
-
-		bitwise_and(imgSkin, img, imgSkin);
 
 		imshow("window", imgSkin);
 		if (waitKey(10) == 27) break;
 	}
-
-
 }
