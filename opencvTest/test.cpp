@@ -4,40 +4,86 @@
 using namespace cv;
 using namespace std;
 
-
-Mat getSkinColorMask(const Mat& img) {
-	Mat imgSkin;
-
-	// 3x3
-	Mat element(3, 3, CV_8U, cv::Scalar(1));
+Mat getMask(const Mat& img, Ptr<BackgroundSubtractor> pMOG2) {
+	Mat skinMsk; //mask from skin color
+	Mat backMsk; //mask from detecting background
+	Mat mask; // mask result 
+	
+	// 5x5
+	Mat element(5, 5, CV_8U, cv::Scalar(1));
 
 	//skin color
-	cvtColor(img, imgSkin, CV_BGR2YCrCb);
-	inRange(imgSkin, Scalar(0, 133, 77), Scalar(255, 173, 127), imgSkin);
-	cvtColor(imgSkin, imgSkin, CV_GRAY2RGB);
+	cvtColor(img, skinMsk, CV_BGR2YCrCb);
+	inRange(skinMsk, Scalar(0, 133, 77), Scalar(255, 173, 127), skinMsk);
+	cvtColor(skinMsk, skinMsk, CV_GRAY2RGB);
 
-	// expansion operation
-	morphologyEx(img, img, MORPH_CLOSE, element);
-	morphologyEx(img, img, MORPH_OPEN, element);
+	// mopology operation
+	GaussianBlur(skinMsk, skinMsk, Size(5, 5), 0.5);
+	morphologyEx(skinMsk, skinMsk, MORPH_CLOSE, element);
+	morphologyEx(skinMsk, skinMsk, MORPH_OPEN, element);
+	
+	//background subtraction
+	pMOG2->apply(img, backMsk);
+	GaussianBlur(backMsk, backMsk, Size(5, 5), 0.5);
+	morphologyEx(backMsk, backMsk, MORPH_CLOSE, element);
+	morphologyEx(backMsk, backMsk, MORPH_OPEN, element);
+	cvtColor(backMsk, backMsk, CV_GRAY2RGB);
 
-	bitwise_and(imgSkin, img, imgSkin);
+	/*
+	//test
+	cout << "skinmsk" << skinMsk.channels() << endl;
+	cout << "backmsk" << backMsk.channels() << endl;
+	*/
 
-	return imgSkin;
+	bitwise_and(backMsk, skinMsk, mask);
+	return mask;
 }
 
 Point findHand(Mat & img) {
-	Mat dist, imgGray;
+	Mat dist;
 	int maxIdx[2];
+	int imgSize = (int)img.rows * (int)img.cols;
 	double radius;
-	
-	cvtColor(img, imgGray, CV_RGB2GRAY);
-	distanceTransform(imgGray, dist, CV_DIST_L2, 5);
+	cvtColor(img, img, CV_RGB2GRAY);
+	distanceTransform(img, dist, CV_DIST_L2, 5);
+
+	threshold(img, img, 2, 255, THRESH_BINARY);
 
 	//maximum -> hand's center
 	minMaxIdx(dist, NULL, &radius, NULL, maxIdx);
 	Point p(maxIdx[1], maxIdx[0]);
 
+	// 5x5
+	Mat element(5, 5, CV_8U, cv::Scalar(1));
+	
+	// mopology operation
+	GaussianBlur(img, img, Size(5, 5), 0.5);
+	morphologyEx(img, img, MORPH_CLOSE, element);
+	morphologyEx(img, img, MORPH_OPEN, element);
+	morphologyEx(img, img, MORPH_OPEN, element);
+
+	// labeling
+	Mat img_labels, stats, centroids;
+	int slabel;
+
+	int numOfLables = connectedComponentsWithStats(img, img_labels,
+		stats, centroids, 8, CV_32S);
+	for (int j = 1; j < numOfLables; j++) {
+		int area = stats.at<int>(j, CC_STAT_AREA);
+		int left = stats.at<int>(j, CC_STAT_LEFT);
+		int top = stats.at<int>(j, CC_STAT_TOP);
+		int width = stats.at<int>(j, CC_STAT_WIDTH);
+		int height = stats.at<int>(j, CC_STAT_HEIGHT);
+		
+		if (area < imgSize * 0.05 ) continue;
+		rectangle(img, Point(left, top), Point(left + width, top + height),
+			255, 4);
+	}
+	
+	cout << numOfLables << endl;
+
 	circle(img, p, (int)radius, Scalar(0, 255, 0), 2);
+	imshow("window", img);
 	return p;
 }
 
@@ -54,23 +100,26 @@ int main(int argc, char** argv) {
 
 	namedWindow("window", 1);
 	Mat img, imgGray;
-	Mat imgSkin;
+	Mat msk, result;
+	Ptr<BackgroundSubtractor> pMOG2;
+	pMOG2 = createBackgroundSubtractorMOG2();
+
 	while (1) {
 		webCam.read(img);
 		cvtColor(img, imgGray, CV_RGB2GRAY);
-		
+
 		if (img.empty()) break;
-						
-		imgSkin = getSkinColorMask(img);
+
+		msk = getMask(img, pMOG2);
+		bitwise_and(img, msk, result);
 		
-		findHand(imgSkin);
-		
-		/*
-		//canny edge
-		Canny(imgGray, imgGray, 50, 100);
+		findHand(msk);
+	
+		/*canny edge
+		//Canny(msk, result, 50, 200);
 		*/
 
-		imshow("window", imgSkin);
+		//imshow("window", result);
 		if (waitKey(10) == 27) break;
 	}
 }
