@@ -1,125 +1,167 @@
-#include "opencv2/opencv.hpp"
-#include <iostream>
+#include "GL/freeglut.h"
+#include "GL/gl.h"
+#include "opencv2/opencv.hpp" 
+#include "calVideo.h"
+#include <iostream>  
+#include <string> 
 
 using namespace cv;
 using namespace std;
 
-Mat getMask(const Mat& img, Ptr<BackgroundSubtractor> pMOG2) {
-	Mat skinMsk; //mask from skin color
-	Mat backMsk; //mask from detecting background
-	Mat mask; // mask result 
-	
-	// 5x5
-	Mat element(5, 5, CV_8U, cv::Scalar(1));
+VideoCapture webCam(0);
 
-	//skin color
-	cvtColor(img, skinMsk, CV_BGR2YCrCb);
-	inRange(skinMsk, Scalar(0, 133, 77), Scalar(255, 173, 127), skinMsk);
-	cvtColor(skinMsk, skinMsk, CV_GRAY2RGB);
+Mat imgCam;
+int screenW;
+int screenH;
 
-	// mopology operation
-	GaussianBlur(skinMsk, skinMsk, Size(5, 5), 0.5);
-	morphologyEx(skinMsk, skinMsk, MORPH_CLOSE, element);
-	morphologyEx(skinMsk, skinMsk, MORPH_OPEN, element);
-	
-	//background subtraction
-	pMOG2->apply(img, backMsk);
-	GaussianBlur(backMsk, backMsk, Size(5, 5), 0.5);
-	morphologyEx(backMsk, backMsk, MORPH_CLOSE, element);
-	morphologyEx(backMsk, backMsk, MORPH_OPEN, element);
-	cvtColor(backMsk, backMsk, CV_GRAY2RGB);
+GLuint texture_background;
+Ptr<BackgroundSubtractor> pMOG2 = createBackgroundSubtractorMOG2();
 
-	/*
-	//test
-	cout << "skinmsk" << skinMsk.channels() << endl;
-	cout << "backmsk" << backMsk.channels() << endl;
-	*/
+//convert Mat to texture
+GLuint MatToTexture(Mat image)
+{
+	if (image.empty())  return -1;
 
-	bitwise_and(backMsk, skinMsk, mask);
-	return mask;
-}
+	GLuint textureID;
+	glGenTextures(1, &textureID);
 
-Point findHand(Mat & img) {
-	Mat dist;
-	int maxIdx[2];
-	int imgSize = (int)img.rows * (int)img.cols;
-	double radius;
-	cvtColor(img, img, CV_RGB2GRAY);
-	distanceTransform(img, dist, CV_DIST_L2, 5);
+	glBindTexture(GL_TEXTURE_2D, textureID);
 
-	threshold(img, img, 2, 255, THRESH_BINARY);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-	//maximum -> hand's center
-	minMaxIdx(dist, NULL, &radius, NULL, maxIdx);
-	Point p(maxIdx[1], maxIdx[0]);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows,
+		0, GL_RGB, GL_UNSIGNED_BYTE, image.ptr());
 
-	// 5x5
-	Mat element(5, 5, CV_8U, cv::Scalar(1));
-	
-	// mopology operation
-	GaussianBlur(img, img, Size(5, 5), 0.5);
-	morphologyEx(img, img, MORPH_CLOSE, element);
-	morphologyEx(img, img, MORPH_OPEN, element);
-	morphologyEx(img, img, MORPH_OPEN, element);
-
-	// labeling
-	Mat img_labels, stats, centroids;
-	int slabel;
-
-	int numOfLables = connectedComponentsWithStats(img, img_labels,
-		stats, centroids, 8, CV_32S);
-	for (int j = 1; j < numOfLables; j++) {
-		int area = stats.at<int>(j, CC_STAT_AREA);
-		int left = stats.at<int>(j, CC_STAT_LEFT);
-		int top = stats.at<int>(j, CC_STAT_TOP);
-		int width = stats.at<int>(j, CC_STAT_WIDTH);
-		int height = stats.at<int>(j, CC_STAT_HEIGHT);
-		
-		if (area < imgSize * 0.05 ) continue;
-		rectangle(img, Point(left, top), Point(left + width, top + height),
-			255, 4);
-	}
-	
-	cout << numOfLables << endl;
-
-	circle(img, p, (int)radius, Scalar(0, 255, 0), 2);
-	imshow("window", img);
-	return p;
+	return textureID;
 }
 
 
-int main(int argc, char** argv) {
-	VideoCapture webCam(0);
+void draw_background()
+{
+	int x = screenW/100.0;
+	int y = screenH/100.0;
+
+	glBegin(GL_QUADS);
+	glTexCoord2f(0.0, 1.0); glVertex3f(-x, -y, 0.0);
+	glTexCoord2f(1.0, 1.0); glVertex3f(x, -y, 0.0);
+	glTexCoord2f(1.0, 0.0); glVertex3f(x, y, 0.0);
+	glTexCoord2f(0.0, 0.0); glVertex3f(-x, y, 0.0);
+	glEnd();
+}
+
+void cameraInit()
+{
 	if (!webCam.isOpened()) {
 		cout << "webcam open error" << endl;
-		return 1;
+		exit(0);
 	}
 
 	webCam.set(CAP_PROP_FRAME_WIDTH, 320);
 	webCam.set(CAP_PROP_FRAME_HEIGHT, 240);
 
-	namedWindow("window", 1);
-	Mat img, imgGray;
-	Mat msk, result;
-	Ptr<BackgroundSubtractor> pMOG2;
-	pMOG2 = createBackgroundSubtractorMOG2();
+	Mat img_frame;
+	webCam.read(img_frame);
 
-	while (1) {
-		webCam.read(img);
-		cvtColor(img, imgGray, CV_RGB2GRAY);
+	screenW = img_frame.cols;
+	screenH = img_frame.rows;
+}
 
-		if (img.empty()) break;
 
-		msk = getMask(img, pMOG2);
-		bitwise_and(img, msk, result);
-		
-		findHand(msk);
-	
-		/*canny edge
-		//Canny(msk, result, 50, 200);
-		*/
+void display()
+{
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		//imshow("window", result);
-		if (waitKey(10) == 27) break;
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+
+	texture_background = MatToTexture(imgCam);
+	if (texture_background < 0) return;
+
+
+	glEnable(GL_TEXTURE_2D);
+
+	glColor3f(1.0f, 1.0f, 1.0f);
+	glBindTexture(GL_TEXTURE_2D, texture_background);
+	glPushMatrix();
+	glTranslatef(0.0, 0.0, -9.0);
+	draw_background();
+	glPopMatrix();
+
+	glDisable(GL_TEXTURE_2D);
+	glPushMatrix();
+	glTranslatef(0.0, 0.0, -4.0);
+	glColor3f(0.0f, 0.0f, 1.0f);
+	glutSolidSphere(0.2,20,10);
+	glPopMatrix();
+
+	glutSwapBuffers();
+}
+
+void reshape(GLsizei width, GLsizei height)
+{
+	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	gluPerspective(45, (GLfloat)width / (GLfloat)height, 1.0, 100.0);
+	glMatrixMode(GL_MODELVIEW);
+}
+
+void getWebCam(int value) {
+	Mat imgCamOrigin, msk, result;
+
+	if (waitKey(10) == 27) {
+		webCam.release();
+		exit(0);
 	}
+
+	webCam.read(imgCamOrigin);
+	if (imgCamOrigin.empty()) {
+		cout << "no image" << endl;
+		webCam.release();
+		exit(0);
+	}
+
+	msk = getMask(imgCamOrigin, pMOG2);
+	msk = findHand(msk, imgCamOrigin);
+	cout << "된다" << endl;
+
+	//bitwise_and(imgCamOrigin, msk, result);
+	cout << "된다" << endl;
+	//cvtColor(result, imgCam, COLOR_GRAY2RGB);
+	cvtColor(msk, imgCam, COLOR_BGR2RGB);
+
+
+	glutPostRedisplay();
+	glutTimerFunc(1, getWebCam, 0);
+}
+
+void init()
+{
+	glClearColor(0.0, 0.0, 0.0, 0.0);
+	glClearDepth(1.0);
+	glEnable(GL_DEPTH_TEST);
+}
+
+int main(int argc, char** argv)
+{
+	glutInit(&argc, argv);
+	glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
+
+	cameraInit();
+	glutInitWindowSize(screenW*3, screenH*3);
+	glutInitWindowPosition(100, 100);
+	glutCreateWindow("window");
+
+	init();
+
+	//callback
+	glutDisplayFunc(display);
+	glutReshapeFunc(reshape);
+	glutTimerFunc(0, getWebCam, 0);
+
+	glutMainLoop();
+	return 0;
 }
